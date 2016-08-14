@@ -1,3 +1,5 @@
+var geolib = require('geolib');
+
 var toGeoJSON = (function() {
     'use strict';
 
@@ -313,17 +315,50 @@ var toGeoJSON = (function() {
                     line = [],
                     times = [],
                     heartRates = [],
+                    markers = [],
+                    totalDistance = 0.0,
+                    distanceBtMrkrs = 0.0,
+                    featureCollection = [],
                     l = pts.length;
+
+                var MARKER_DISTANCE = 1000.0 // meters
+
                 if (l < 2) return {};  // Invalid line in GeoJSON
                 for (var i = 0; i < l; i++) {
                     var c = coordPair(pts[i]);
                     line.push(c.coordinates);
+
+                    if (i > 1 && line[i] !== 'undefined') {
+                      var origin = {latitude: line[i - 1][1], longitude: line[i - 1][0]};
+                      var dest = {latitude: c.coordinates[1], longitude: c.coordinates[0]};
+
+                      var dist = geolib.getDistance(origin, dest);
+                      distanceBtMrkrs += dist; // 2200
+
+                      if (distanceBtMrkrs > MARKER_DISTANCE) {
+                        var delta = (distanceBtMrkrs) - MARKER_DISTANCE; // 1200
+                        while(delta > 0) {
+                          var bearing = geolib.getBearing(origin, dest);
+                          var coords = geolib.computeDestinationPoint(origin, MARKER_DISTANCE, bearing);
+
+                          featureCollection.push({type: 'Feature', properties: {}, geometry: {type: 'Point', coordinates: [coords.longitude, coords.latitude]}});
+
+                          if (delta - MARKER_DISTANCE > 0) delta = delta - MARKER_DISTANCE;
+                          else  break;
+                        }
+                        distanceBtMrkrs = delta;
+                      }
+                      totalDistance += dist;
+                    }
+
                     if (c.time) times.push(c.time);
                     if (c.heartRate) heartRates.push(c.heartRate);
                 }
                 return {
                     line: line,
+                    featureCollection: featureCollection,
                     times: times,
+                    totalDistance: totalDistance,
                     heartRates: heartRates
                 };
             }
@@ -332,18 +367,26 @@ var toGeoJSON = (function() {
                     track = [],
                     times = [],
                     heartRates = [],
+                    totalDistance = 0,
+                    featureCollection = [],
                     line;
                 for (var i = 0; i < segments.length; i++) {
                     line = getPoints(segments[i], 'trkpt');
                     if (line.line) track.push(line.line);
                     if (line.times && line.times.length) times.push(line.times);
                     if (line.heartRates && line.heartRates.length) heartRates.push(line.heartRates);
+                    totalDistance += line.totalDistance;
+                    if (line.featureCollection && line.featureCollection.length) {
+                      featureCollection = featureCollection.concat(line.featureCollection);
+                    }
+
                 }
                 if (track.length === 0) return;
                 var properties = getProperties(node);
                 if (times.length) properties.coordTimes = track.length === 1 ? times[0] : times;
                 if (heartRates.length) properties.heartRates = track.length === 1 ? heartRates[0] : heartRates;
-                return {
+
+                var jsonLine = {
                     type: 'Feature',
                     properties: properties,
                     geometry: {
@@ -351,6 +394,13 @@ var toGeoJSON = (function() {
                         coordinates: track.length === 1 ? track[0] : track
                     }
                 };
+
+                if (featureCollection && featureCollection.length) {
+                  featureCollection.push(jsonLine);
+                  return featureCollection;
+                } else {
+                  return jsonLine;
+                }
             }
             function getRoute(node) {
                 var line = getPoints(node, 'rtept');

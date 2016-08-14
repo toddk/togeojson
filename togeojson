@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env node 
 
 var tj = require('./'),
     argv = require('minimist')(process.argv.slice(2)),
